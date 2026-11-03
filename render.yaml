@@ -3,7 +3,8 @@ services:
     name: m1nx-apk-analyzer
     runtime: python
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn app:app
+    startCommand: gunicorn --bind 0.0.0.0:$PORT app:app
+    healthCheckPath: /
     plan: free
     envVars:
       - key: SECRET_KEY
