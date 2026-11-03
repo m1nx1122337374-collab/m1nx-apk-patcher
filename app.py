@@ -1,7 +1,7 @@
 import os
 import subprocess
 import zipfile
-from flask import Flask, render_template_string, request, send_file, redirect, url_for
+from flask import Flask, render_template_string, request, send_file
 
 app = Flask(__name__)
 UPLOAD_FOLDER = "uploads"
@@ -9,66 +9,42 @@ OUTPUT_FOLDER = "outputs"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 
-# ফ্রন্টএন্ড ওয়েব ইন্টারফেস (HTML + CSS)
+# একদম সিম্পল এবং ডাইরেক্ট ফাইল সিলেক্ট অপশন সহ ফ্রন্টএন্ড
 HTML_PAGE = """
 <!DOCTYPE html>
 <html lang="bn">
 <head>
     <meta charset="UTF-8">
-    <title>M1NX VIP - Cloud APK Patcher</title>
+    <title>M1NX VIP - APK Patcher</title>
     <style>
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #0f172a; color: #f8fafc; text-align: center; padding: 40px; }
-        .card { background: #1e293b; padding: 40px; border-radius: 12px; display: inline-block; box-shadow: 0 10px 25px rgba(0,0,0,0.5); max-width: 500px; width: 100%; border: 1px solid #334155; }
-        h2 { color: #38bdf8; margin-bottom: 10px; }
-        p { color: #94a3b8; font-size: 14px; margin-bottom: 25px; }
-        input[type="file"] { display: none; }
-        .file-upload-btn { background: #334155; color: #cbd5e1; padding: 12px 20px; border-radius: 6px; cursor: pointer; display: inline-block; margin-bottom: 20px; border: 1px dashed #64748b; width: 80%; }
-        .file-upload-btn:hover { background: #475569; border-color: #38bdf8; }
-        button { background: #0284c7; color: white; border: none; padding: 12px 25px; font-size: 16px; font-weight: bold; cursor: pointer; border-radius: 6px; width: 100%; transition: 0.3s; }
-        button:hover { background: #0369a1; }
-        .loading { display: none; margin-top: 20px; color: #facc15; font-weight: bold; }
+        body { font-family: Arial, sans-serif; background: #0f172a; color: #fff; text-align: center; padding: 30px; }
+        .card { background: #1e293b; padding: 30px; border-radius: 12px; display: inline-block; max-width: 450px; width: 100%; box-shadow: 0 4px 15px rgba(0,0,0,0.5); }
+        h2 { color: #38bdf8; }
+        input[type="file"] { background: #334155; color: #fff; padding: 10px; border-radius: 6px; width: 100%; margin: 15px 0; border: 1px solid #64748b; }
+        button { background: #22c55e; color: white; border: none; padding: 12px; font-size: 16px; font-weight: bold; cursor: pointer; border-radius: 6px; width: 100%; }
+        button:hover { background: #16a34a; }
+        .loading { display: none; color: #facc15; margin-top: 15px; font-weight: bold; }
     </style>
 </head>
 <body>
     <div class="card">
         <h2>M1NX VIP Cloud Patcher</h2>
-        <p>সঠিক ফেক প্রোটেকশনযুক্ত এপিকে ফাইলটি সিলেক্ট করুন। অন্য কোনো এপিকে গ্রহণ করা হবে না।</p>
+        <p>সঠিক প্রোটেকশনযুক্ত APK ফাইলটি সিলেক্ট করুন:</p>
         <form action="/upload" method="post" enctype="multipart/form-data" onsubmit="showLoading()">
-            <label class="file-upload-btn" id="file-label">APK ফাইল সিলেক্ট করুন (.apk)</label>
-            <input type="file" name="apk" accept=".apk" required id="apk-file" onchange="updateFileName(this)">
-            <button type="submit" id="submit-btn">প্রসেস শুরু করুন</button>
+            <input type="file" name="apk" accept=".apk" required>
+            <button type="submit" id="btn">প্রসেস শুরু করুন</button>
         </form>
-        <div class="loading" id="loading-text">⏳ এপিকে ডিকম্পাইল, বাইপাস এবং সাইন হচ্ছে... দয়া করে পেজটি কেটে দেবেন না, সময় লাগতে পারে।</div>
+        <div class="loading" id="load">⏳ কাজ চলছে... দয়া করে অপেক্ষা করুন, এপিকে প্যাচ ও সাইন হতে সময় লাগবে।</div>
     </div>
-
     <script>
-        function updateFileName(input) {
-            if (input.files && input.files[0]) {
-                document.getElementById('file-label').innerText = "Selected: " + input.files[0].name;
-            }
-        }
         function showLoading() {
-            document.getElementById('submit-btn').style.display = 'none';
-            document.getElementById('loading-text').style.display = 'block';
+            document.getElementById('btn').style.display = 'none';
+            document.getElementById('load').style.display = 'block';
         }
     </script>
 </body>
 </html>
 """
-
-def verify_target_apk(apk_path):
-    """
-    এখানে এপিকে-র নির্দিষ্ট প্যাকেজ নেম বা ফেক প্রোডাকশন সিগনেচার চেক করা হবে। 
-    আপনার টার্গেট অ্যাপের আসল প্যাকেজ নেম বা সিগনেচার এখানে ভ্যালিড করতে হবে।
-    """
-    try:
-        with zipfile.ZipFile(apk_path, 'r') as z:
-            if 'AndroidManifest.xml' in z.namelist():
-                # সহজ সিকিউরিটি চেক: আপনি চাইলে নির্দিষ্ট ফাইলের উপস্থিতি বা আকার চেক করতে পারেন
-                return True
-    except Exception:
-        pass
-    return False
 
 @app.route('/')
 def index():
@@ -85,28 +61,22 @@ def upload_file():
     if file:
         filepath = os.path.join(UPLOAD_FOLDER, file.filename)
         file.save(filepath)
-        
-        # ১. প্রোটেকশন ভ্যালিডেশন চেক
-        if not verify_target_apk(filepath):
-            os.remove(filepath)
-            return "<h3 style='color:red; text-align:center; margin-top:50px;'>❌ ভুল এপিকে ফাইল! এটি কাঙ্ক্ষিত ফেক প্রোটেকশনযুক্ত এপিকে নয়। দয়া করে সঠিক এপিকে আপলোড করুন। <br><br><a href='/' style='color:#38bdf8;'>ফিরে যান</a></h3>"
 
         decoded_dir = os.path.join(UPLOAD_FOLDER, "decoded")
         output_apk_name = "Modded_" + file.filename
         output_apk_path = os.path.join(OUTPUT_FOLDER, output_apk_name)
         
         try:
-            # ২. Apktool দিয়ে ডিকম্পাইল করা
+            # Apktool দিয়ে ডিকম্পাইল
             subprocess.run(f"apktool d '{filepath}' -o '{decoded_dir}' -f", shell=True, check=True)
             
-            # ৩. স্মালি প্যাচিং বা ফেক সিকিউরিটি বাইপাস লজিক (এখানে আপনার কাস্টম রিপ্লেসমেন্ট করতে পারেন)
-            # উদাহরণস্বরূপ নির্দিষ্ট ফাইলের ভেতরে কোড সার্চ ও রিপ্লেস করা যেতে পারে।
+            # এখানে আপনার কাস্টম প্যাচিং লজিক বা বাইপাস কোড বসাতে পারবেন
             
-            # ৪. Apktool দিয়ে রি-কম্পাইল করা
+            # Apktool দিয়ে রি-কম্পাইল
             unsigned_apk = os.path.join(UPLOAD_FOLDER, "unsigned.apk")
             subprocess.run(f"apktool b '{decoded_dir}' -o '{unsigned_apk}'", shell=True, check=True)
             
-            # ৫. ডিবাগ কিস্টোর দিয়ে এপিকে সাইন করা
+            # সাইন করা
             keystore_path = os.path.expanduser("~/.android/debug.keystore")
             if not os.path.exists(keystore_path):
                 os.makedirs(os.path.dirname(keystore_path), exist_ok=True)
@@ -118,43 +88,38 @@ def upload_file():
             if os.path.exists(unsigned_apk):
                 os.rename(unsigned_apk, output_apk_path)
 
-            # ক্লিনআপ টেম্পোরারি ফোল্ডার
+            # ক্লিনআপ
             if os.path.exists(decoded_dir):
                 import shutil
                 shutil.rmtree(decoded_dir)
             if os.path.exists(filepath):
                 os.remove(filepath)
 
-            # ৬. সাকসেস পেজ এবং অটো-ডাউনলোড লিংক
+            # অটো ডাউনলোড পেজ
             success_html = f"""
             <!DOCTYPE html>
             <html lang="bn">
             <head>
                 <meta charset="UTF-8">
-                <title>Success - M1NX VIP</title>
+                <title>Success</title>
                 <style>
-                    body {{ font-family: 'Segoe UI', Tahoma, sans-serif; background: #0f172a; color: #f8fafc; text-align: center; padding: 50px; }}
-                    .card {{ background: #1e293b; padding: 40px; border-radius: 12px; display: inline-block; box-shadow: 0 10px 25px rgba(0,0,0,0.5); border: 1px solid #334155; }}
-                    h2 {{ color: #22c55e; }}
+                    body {{ font-family: Arial; background: #0f172a; color: #fff; text-align: center; padding: 50px; }}
+                    .card {{ background: #1e293b; padding: 30px; border-radius: 12px; display: inline-block; }}
                     .btn {{ background: #22c55e; color: white; padding: 12px 25px; text-decoration: none; border-radius: 6px; display: inline-block; font-weight: bold; margin-top: 20px; }}
-                    .btn:hover {{ background: #16a34a; }}
                 </style>
                 <script>
-                    // অটোমেটিক ডাউনলোড ট্রিগার করা
                     window.onload = function() {{
                         setTimeout(function() {{
                             window.location.href = "/download/{output_apk_name}";
-                        }}, 1500);
+                        }}, 1000);
                     }};
                 </script>
             </head>
             <body>
                 <div class="card">
-                    <h2>🎉 প্রসেস সফল হয়েছে!</h2>
-                    <p>ফেক প্রোটেকশন সফলভাবে বাইপাস করা হয়েছে। আপনার মডিফাইড এপিকে ফাইলটি অটোমেটিক ডাউনলোড হওয়া শুরু হয়েছে।</p>
-                    <a href="/download/{output_apk_name}" class="btn">ডাউনলোড না হলে এখানে ক্লিক করুন</a>
-                    <br><br>
-                    <a href="/" style="color: #38bdf8; text-decoration: none; font-size: 14px;">← অন্য এপিকে প্যাচ করুন</a>
+                    <h2 style="color: #22c55e;">🎉 সাকসেস!</h2>
+                    <p>এপিকে সফলভাবে মডিফাইড ও সাইন করা হয়েছে। ডাউনলোড শুরু হচ্ছে...</p>
+                    <a href="/download/{output_apk_name}" class="btn">ডাউনলোড করুন</a>
                 </div>
             </body>
             </html>
@@ -162,7 +127,7 @@ def upload_file():
             return success_html
 
         except Exception as e:
-            return f"<h3 style='color:red; text-align:center; margin-top:50px;'>❌ প্রসেস করার সময় ত্রুটি ঘটেছে: {str(e)}<br><br><a href='/' style='color:#38bdf8;'>পুনরায় চেষ্টা করুন</a></h3>"
+            return f"<h3 style='color:red; text-align:center; margin-top:50px;'>❌ এরর এসেছে: {str(e)}<br><br><a href='/' style='color:#38bdf8;'>ফিরে যান</a></h3>"
 
 @app.route('/download/<filename>')
 def download_file(filename):
