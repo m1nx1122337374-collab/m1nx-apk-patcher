@@ -41,6 +41,7 @@ class APKAnalyzer:
             result["package"], result["version"], tool = self._manifest_metadata(apk)
             if tool: result["tools"].append(tool)
             result["protection_report"] = self._protection_report(payloads, names)
+            result["protection_assessments"] = self._protection_assessments(payloads, names)
             result["components"] = {key: self._category(names, key) for key in CATEGORY_RULES}
             result["warnings"].append("A static APK cannot prove runtime behavior. Items labelled heuristic or unverified require source/build evidence or controlled testing.")
             return result
@@ -96,6 +97,50 @@ class APKAnalyzer:
         add("Suspicious or Modified Components", "heuristic" if suspicious else "not observed", "low" if suspicious else "low", suspicious[:40] or ["No suspicious archive-name indicator"], "Names alone are never proof; compare hashes against a trusted build.")
         add("Anti-Tamper Indicators", "unverified", "low", ["No runtime execution test performed"], "Static inspection cannot confirm anti-tamper behavior. Review manifest, native code, and controlled runtime logs if authorized.")
         return report
+
+    def _protection_assessments(self, payloads: dict[str, bytes], names: list[str]) -> list[dict[str, Any]]:
+        """Assess suspicious protection candidates without calling a filename 'fake'."""
+        candidate_names = [n for n in names if n.startswith(("lib/", "assets/")) or n.endswith((".dex", ".bin"))]
+        lower_blob = {n: payloads[n].lower() for n in names}
+        vendor_markers = {
+            "ScKit Shield": (b"scmain", b"scikit", b"sckit", b"sc_protect"),
+            "Virbox / Techdavisk VM": (b"virbox", b"techdavisk", b"dongbao", b"tdvm"),
+        }
+        assessments: list[dict[str, Any]] = []
+        for name in candidate_names:
+            base = Path(name).name.lower().encode()
+            own = lower_blob[name]
+            marker_hits = [label for label, markers in vendor_markers.items() if any(m in own for m in markers)]
+            references = [other for other, blob in lower_blob.items() if other != name and base and base in blob]
+            if marker_hits:
+                status = "heuristic" if references else "unknown"
+                functional = "possible static reference" if references else "not established"
+                explanation = "Known marker plus cross-file reference is still not proof of runtime functionality; controlled authorized testing is required."
+            elif name.startswith("lib/") and not references:
+                status = "possible_unnecessary"
+                functional = "not established"
+                explanation = "A native component exists but its basename was not referenced by inspected archive payloads. This is evidence for review, not proof that it is fake or safe to delete."
+            else:
+                continue
+            assessments.append({"component": marker_hits[0] if marker_hits else "Custom protection candidate", "location": name,
+                                "status": status, "functional_status": functional, "known_markers": marker_hits,
+                                "cross_file_references": references[:30], "evidence": [f"archive entry: {name}", f"references found: {len(references)}"],
+                                "fake_protection_assessment": "not proven fake", "explanation": explanation})
+        digest_groups: dict[str, list[str]] = {}
+        for name in candidate_names:
+            digest_groups.setdefault(hashlib.sha256(payloads[name]).hexdigest(), []).append(name)
+        for digest, group in digest_groups.items():
+            if len(group) > 1:
+                assessments.append({"component": "Duplicate protection candidate", "location": ", ".join(group), "status": "heuristic",
+                                    "functional_status": "unknown", "known_markers": [], "cross_file_references": [],
+                                    "evidence": [f"identical SHA-256: {digest}", f"duplicate entries: {len(group)}"],
+                                    "fake_protection_assessment": "not proven fake", "explanation": "Identical payloads may be intentional multi-ABI packaging; do not remove without source/build evidence."})
+        if not assessments:
+            assessments.append({"component": "Fake/unnecessary protection assessment", "location": "none", "status": "unknown",
+                                "functional_status": "not established", "known_markers": [], "cross_file_references": [],
+                                "evidence": ["No evidence-based candidate met the review threshold"], "fake_protection_assessment": "not determined",
+                                "explanation": "Absence of a candidate does not prove absence of protection."})
+        return assessments
 
     def _manifest_metadata(self, apk: Path) -> tuple[str, str, str | None]:
         if shutil.which("aapt2"):

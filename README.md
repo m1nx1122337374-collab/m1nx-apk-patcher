@@ -1,24 +1,26 @@
-# M1NX VIP APK Analyzer & Restoration Tool
+# M1NX VIP Fake Protection Detector & APK Restoration
 
-A Render-compatible Flask web application for authorized APK inspection, evidence-based comparison, component-level reconstruction from a trusted original, verification, and export.
+A Render-compatible Flask application for authorized APK inspection, evidence-based protection assessment, restoration preview, component-level reconstruction, verification, and export.
 
-## What it actually does
+## Detection behavior
 
-**Deep Analysis** reads the APK archive and reports directly observable signature entries, native libraries, DEX/resources/manifest inventory, SHA-256, package metadata when `aapt2` is available, and detailed protection findings. ScKit Shield, Virbox/Techdavisk, string encryption, obfuscation, and anti-tamper are reported as confirmed, heuristic, unknown, or unverified with evidence and an explanation. Static evidence is never presented as proof of runtime behavior.
+The Deep Analysis report inspects archive bytes and locations rather than declaring a component fake from a filename. It records evidence for signature entries, DEX, resources, manifest, native libraries, known ScKit Shield and Virbox/Techdavisk markers, string-density indicators, obfuscation indicators, anti-tamper claims, suspicious paths, duplicate payload hashes, custom protection candidates, and cross-file references.
 
-**APK Comparison** hashes every archive entry and reports added, removed, changed, and unchanged files. It also reports manifest, DEX, resources, native-library, signing, and asset category changes.
+Each assessment has a status such as `confirmed`, `heuristic`, `unknown`, `possible_unnecessary`, or `unverified`. A `possible_unnecessary` result means a candidate was found without an observed cross-file reference; it is **not** permission to delete it. The report explicitly says when functionality cannot be established statically. Unknown components are never automatically removed.
 
-**Restoration** takes both a modified APK and a trusted original APK. It reconstructs a new archive by preserving unchanged modified entries, replacing changed or missing entries with trusted-original bytes, and optionally removing entries that exist only in the modified APK. It produces a restoration report listing replacements, removals, preserved files, limitations, and verification results. This is not a copy-only button and it does not bypass any protection.
+## Restoration workflow
 
-**Verification** checks ZIP integrity, manifest presence, and `apksigner` output when `apksigner` is installed. A rebuilt APK is not claimed to be installable or publisher-signed when the signature is invalid or unavailable; an authorized signing key and device/API testing may still be required.
+1. Upload the modified APK and a trusted original APK.
+2. Run **COMPARE / PREVIEW** to see added, removed, changed, unchanged, manifest, DEX, resource, native-library, signing, and asset differences. No archive is written during preview.
+3. Run **RESTORE ORIGINAL APK**. The output preserves unchanged modified entries, replaces changed or missing entries with bytes from the trusted original, and removes added entries only when the explicit checkbox is selected.
+4. Review the restoration report listing replaced, preserved, and removed entries, limitations, integrity, signature, and package-compatibility evidence.
+5. Download the exported APK only after reviewing the report.
 
-## Safety boundary
-
-This project does **not** bypass licensing, authentication, anti-cheat, DRM, access control, signatures, or third-party protections. Use it only with APKs and source/backup material you are authorized to analyze and restore.
+A rebuilt APK is not claimed to be publisher-signed when `apksigner` reports invalid/unverifiable or is unavailable. An authorized signing key and device/API testing may still be needed. The tool does not bypass licensing, authentication, DRM, anti-cheat, access control, signatures, or third-party protections.
 
 ## Render deployment
 
-Connect this repository to Render as a Web Service. The included `render.yaml` sets the build command to `pip install -r requirements.txt`, binds Gunicorn to Render's `$PORT`, and uses `gunicorn --bind 0.0.0.0:$PORT app:app`. The included `Aptfile` contains the requested headless Java and xcb packages. Render installs only Flask and Gunicorn from `requirements.txt`.
+Connect this repository to Render as a Web Service. Use `pip install -r requirements.txt` as the build command and `gunicorn --bind 0.0.0.0:$PORT app:app` as the start command. `render.yaml` contains these settings and the health path `/`. `requirements.txt` contains only Flask and Gunicorn.
 
 ## Local run
 
@@ -29,4 +31,4 @@ pip install -r requirements.txt
 gunicorn --bind 0.0.0.0:8000 app:app
 ```
 
-Open `http://127.0.0.1:8000`. Optional `aapt2` and `apksigner` tools improve metadata and signature verification. Upload limit is 300 MB.
+Optional `aapt2` improves package/version metadata and `apksigner` enables cryptographic signature verification. Upload limit is 300 MB.
