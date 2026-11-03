@@ -27,9 +27,9 @@ PAGE = """
 :root{--bg:#0b1020;--card:#111a30;--line:#26395f;--text:#edf2ff;--muted:#95a6ca;--blue:#5d7cf2;--green:#2b9377;--amber:#a96f35}*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 10% 0,#1a2d5a 0,transparent 35%),var(--bg);color:var(--text);font:15px Inter,system-ui,sans-serif}.wrap{max-width:1120px;margin:auto;padding:32px 20px}.hero{display:flex;justify-content:space-between;gap:20px;align-items:end;margin-bottom:24px}.eyebrow{color:#7896ef;letter-spacing:2px;font-size:12px;font-weight:800}.title{font-size:clamp(30px,5vw,54px);line-height:.95;margin:8px 0;font-weight:900}.muted{color:var(--muted)}.grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}@media(max-width:760px){.grid{grid-template-columns:1fr}.hero{display:block}}.card{background:rgba(17,26,48,.9);border:1px solid var(--line);border-radius:18px;padding:20px;box-shadow:0 18px 50px #0003}.drop{border:1px dashed #5574bd;background:#101d38;border-radius:14px;padding:30px;text-align:center}.drop input{max-width:100%;margin-top:14px}.actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:15px}button,.button{border:0;border-radius:9px;padding:12px 16px;color:#fff;font-weight:800;text-decoration:none;cursor:pointer;background:var(--blue)}button.green,.button.green{background:var(--green)}button.amber{background:var(--amber)}pre{white-space:pre-wrap;word-break:break-word;background:#0a1020;border:1px solid #1f3154;border-radius:12px;padding:15px;color:#cbd7ef;max-height:520px;overflow:auto}.flash{padding:12px;border-radius:10px;background:#42252b;color:#ffbec6;margin-bottom:15px}.badge{display:inline-block;color:#9fb7ff;background:#1c2c50;border-radius:20px;padding:5px 10px;margin:3px;font-size:12px}.note{font-size:12px;color:#8495b7;margin-top:22px}
 </style></head><body><div class="wrap"><div class="hero"><div><div class="eyebrow">M1NX VIP / AUTHORIZED TOOLING</div><div class="title">APK ANALYZER<br>& RESTORATION</div><p class="muted">Evidence-based inspection for APKs you own or are authorized to analyze.</p></div><span class="badge">RENDER READY</span></div>
 {% with messages=get_flashed_messages() %}{% for message in messages %}<div class="flash">{{message}}</div>{% endfor %}{% endwith %}
-<div class="grid"><section class="card"><h2>1. Select APK</h2><form action="{{url_for('analyze')}}" method="post" enctype="multipart/form-data"><div class="drop">Drop an APK here or select a file<br><input type="file" name="apk" accept=".apk" required></div><div class="actions"><button type="submit">START ANALYSIS</button></div></form></section>
+<div class="grid"><section class="card"><h2>1. Deep Analysis</h2><form action="{{url_for('analyze')}}" method="post" enctype="multipart/form-data"><div class="drop">Drop an APK here or select a file<br><input type="file" name="apk" accept=".apk" required></div><div class="actions"><button type="submit">DEEP ANALYSIS</button></div></form></section>
 <section class="card"><h2>2. Compare APKs</h2><form action="{{url_for('compare')}}" method="post" enctype="multipart/form-data"><p class="muted">Upload a trusted original and the modified APK.</p><input type="file" name="original" accept=".apk" required><br><br><input type="file" name="modified" accept=".apk" required><div class="actions"><button type="submit">COMPARE APK</button></div></form></section>
-<section class="card"><h2>3. Restore from trusted original</h2><form action="{{url_for('restore')}}" method="post" enctype="multipart/form-data"><p class="muted">This copies only a trusted original APK. No protection or access control is bypassed.</p><input type="file" name="original" accept=".apk" required><div class="actions"><button class="amber" type="submit">RESTORE APK</button></div></form></section>
+<section class="card"><h2>3. Restoration</h2><form action="{{url_for('restore')}}" method="post" enctype="multipart/form-data"><p class="muted">Reconstructs the modified archive: replaces changed/removed entries from the trusted original and can remove added entries.</p><label>Modified APK<br><input type="file" name="modified" accept=".apk" required></label><br><label>Trusted original APK<br><input type="file" name="original" accept=".apk" required></label><br><label><input type="checkbox" name="remove_added" value="yes"> remove files only present in modified APK</label><div class="actions"><button class="amber" type="submit">RESTORE APK</button></div></form></section>
 <section class="card"><h2>Safety boundary</h2><p class="muted">Findings are heuristic indicators, not proof. The service does not bypass authentication, licensing, anti-cheat, DRM, signatures, or access controls.</p><p class="note">For large APKs, use a private deployment and configure appropriate storage/retention policies.</p></section></div>
 {% if result %}<section class="card" style="margin-top:18px"><h2>Report</h2><pre>{{result}}</pre></section>{% endif %}</div></body></html>
 """
@@ -71,11 +71,12 @@ def compare():
 @app.post("/restore")
 def restore():
     try:
+        modified = save_upload(request.files.get("modified"))
         source = save_upload(request.files.get("original"))
         output = OUTPUTS / f"M1NX_restored_{uuid.uuid4().hex[:8]}.apk"
-        restorer.restore_from_apk(source, output)
-        verification = restorer.verify(output)
-        return send_file(output, as_attachment=True, download_name="M1NX_restored.apk", mimetype="application/vnd.android.package-archive")
+        report = restorer.restore_components(modified, source, output, replace_changed=True, remove_added=request.form.get("remove_added") == "yes")
+        report["download_url"] = url_for("download", filename=output.name)
+        return render_template_string(PAGE, result=json.dumps(report, indent=2, ensure_ascii=False))
     except Exception as exc:
         flash(str(exc)); return redirect(url_for("index"))
 
@@ -83,6 +84,14 @@ def restore():
 @app.errorhandler(413)
 def too_large(_):
     flash("File is too large. Maximum upload size is 300 MB."); return redirect(url_for("index"))
+
+
+@app.get("/download/<filename>")
+def download(filename):
+    path = (OUTPUTS / secure_filename(filename)).resolve()
+    if path.parent != OUTPUTS.resolve() or not path.is_file():
+        flash("Export file not found or expired"); return redirect(url_for("index"))
+    return send_file(path, as_attachment=True, download_name="M1NX_restored.apk", mimetype="application/vnd.android.package-archive")
 
 
 if __name__ == "__main__":
